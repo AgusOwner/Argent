@@ -22,13 +22,13 @@ jobs:
             CODE_SIGN_IDENTITY="" \
             DEVELOPMENT_TEAM="" \
             PROVISIONING_PROFILE_SPECIFIER="" \
-            -derivedDataPath build \
+            CONFIGURATION_BUILD_DIR="$(pwd)/build" \
             clean build
 
       - name: Package IPA
         run: |
           mkdir -p Payload
-          cp -R build/Build/Products/Release-iphoneos/Argent.app Payload/
+          cp -R build/Argent.app Payload/
           zip -r Argent-unsigned.ipa Payload
 
       - name: Upload artifact
