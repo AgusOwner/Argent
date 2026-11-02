@@ -4,6 +4,7 @@ import UIKit
 @main
 struct ThreeOneOSFiveApp: App {
     @StateObject private var appState = AppState()
+    @StateObject private var licenseStore = LicenseStore()
     @StateObject private var patchDraftCoordinator = PatchDraftCoordinator()
     @StateObject private var fileOperationCoordinator = FileOperationCoordinator()
     @StateObject private var patchStore = PatchProjectStore()
@@ -34,18 +35,26 @@ struct ThreeOneOSFiveApp: App {
     var body: some Scene {
         WindowGroup {
             ZStack {
-                ContentView()
-                    .environmentObject(appState)
-                    .environmentObject(patchDraftCoordinator)
-                    .environmentObject(fileOperationCoordinator)
-                    .environmentObject(patchStore)
-                    .environmentObject(repositoryStore)
-                    .environment(\.appLanguage, language)
-                    .environment(\.locale, language.locale)
-                    .opacity(showOnboarding ? 0 : 1)
-                    .allowsHitTesting(!showOnboarding)
+                Group {
+                    if licenseStore.isUnlocked {
+                        ContentView()
+                            .environmentObject(appState)
+                            .environmentObject(patchDraftCoordinator)
+                            .environmentObject(fileOperationCoordinator)
+                            .environmentObject(patchStore)
+                            .environmentObject(repositoryStore)
+                            .environment(\.appLanguage, language)
+                            .environment(\.locale, language.locale)
+                            .opacity(showOnboarding ? 0 : 1)
+                            .allowsHitTesting(!showOnboarding)
+                    } else {
+                        LicenseGateView()
+                            .environmentObject(licenseStore)
+                            .environment(\.appLanguage, language)
+                    }
+                }
 
-                if showOnboarding {
+                if licenseStore.isUnlocked && showOnboarding {
                     OnboardingView {
                         OnboardingStore.markCompleted()
                         withAnimation(reduceMotion ? nil : .easeInOut(duration: 0.24)) {
@@ -81,15 +90,19 @@ struct ThreeOneOSFiveApp: App {
                     }
                 )
             }
+            .task { await licenseStore.restore() }
             .onAppear {
-                if !showOnboarding {
+                if !showOnboarding, licenseStore.isUnlocked {
                     appState.detectSupport()
                     checkForUpdate()
                 }
             }
             .onChange(of: scenePhase) { phase in
                 guard phase == .active, !showOnboarding else { return }
-                appState.detectSupport()
+                Task {
+                    await licenseStore.revalidateIfNeeded()
+                    if licenseStore.isUnlocked { appState.detectSupport() }
+                }
             }
             .onOpenURL { url in
                 patchDraftCoordinator.presentImport(url)
@@ -161,8 +174,6 @@ class AppState: ObservableObject {
     private func refreshKernelExploitStatus() {
         guard !kernelExploitRunning else { return }
 
-        // iOS < 26: kernel R/W success persists (no sandbox probe)
-        // iOS >= 26: verify full sandbox escape is still active
         if KernelExploit.requiresSandboxEscape {
             if KernelExploit.hasSandboxAccess() {
                 if !exploitStatus.isSuccess {
